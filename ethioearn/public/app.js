@@ -8,7 +8,7 @@ const MSG = { USER_BLOCKED: "This account is restricted.", DAILY_LIMIT_REACHED: 
   CAMPAIGN_EXHAUSTED: "This offer just ran out.", CAMPAIGN_UNAVAILABLE: "This offer is not available.", COMPLETED_TOO_EARLY: "Please stay for the full time.",
   BELOW_MINIMUM: "Amount is below the minimum.", INSUFFICIENT_BALANCE: "Not enough balance.", UNAUTHENTICATED: "Session expired. Reopen the app." };
 const TABS = [["home", "Home"], ["ads", "Ads"], ["withdraw", "Withdraw"]];
-let token = null, cur = "home", wallet = null, busy = false;
+let token = null, cur = "home", wallet = null, busy = false, role = null;
 
 async function api(path, opts = {}) {
   const r = await fetch("/api/v1" + path, { ...opts, headers: { "Content-Type": "application/json", ...(token ? { Authorization: "Bearer " + token } : {}), ...(opts.headers || {}) } });
@@ -17,7 +17,7 @@ async function api(path, opts = {}) {
   return j;
 }
 function toast(m) { const t = $("toast"); t.textContent = MSG[m] || m; t.classList.remove("hide"); clearTimeout(toast.t); toast.t = setTimeout(() => t.classList.add("hide"), 3500); }
-function tabs() { $("tabs").innerHTML = TABS.map(([k, n]) => `<button class="tab" data-act="tab" data-k="${k}" aria-current="${k === cur}">${n}</button>`).join(""); }
+function tabs() { $("tabs").innerHTML = (role ? TABS.concat([["admin", "Admin"]]) : TABS).map(([k, n]) => `<button class="tab" data-act="tab" data-k="${k}" aria-current="${k === cur}">${n}</button>`).join(""); }
 
 async function show(v) {
   cur = v; tabs(); $("view").innerHTML = '<p class="empty">Loading…</p>';
@@ -74,6 +74,6 @@ document.addEventListener("click", (e) => {
 (async function boot() {
   tabs();
   if (!tg || !tg.initData) { $("acct").textContent = "Not in Telegram"; $("view").innerHTML = '<p class="empty">Please open EthioEarn from Telegram.</p>'; return; }
-  try { token = (await api("/auth/telegram", { method: "POST", body: JSON.stringify({ initData: tg.initData }) })).token; $("acct").textContent = "Account active"; show("home"); }
+  try { token = (await api("/auth/telegram", { method: "POST", body: JSON.stringify({ initData: tg.initData }) })).token; $("acct").textContent = "Account active"; try { role = (await api("/admin/me")).role; } catch (e) { role = null; } show("home"); }
   catch (e) { $("acct").textContent = "Offline"; $("view").innerHTML = `<p class="empty">${esc(MSG[e.message] || "Could not sign in. Reopen the app.")}</p>`; }
 })();

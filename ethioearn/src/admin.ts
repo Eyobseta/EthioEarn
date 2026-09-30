@@ -37,3 +37,10 @@ export async function reviewWithdrawal(tx: Tx, actor: string, id: string, action
   if (action === "reject") await rejectWithdrawal(tx, id); else await markPaid(tx, id, reference ?? "");
   await audit(tx, actor, action === "reject" ? "WITHDRAWAL_REJECTED" : "WITHDRAWAL_PAID", "withdrawal", id, { reference });
 }
+/** One-click DRAFT -> ACTIVE for a sole SUPER admin. Every step is still audited. */
+export async function fastTrackCampaign(tx: Tx, actor: string, id: string) {
+  const c = (await tx.query(`SELECT status FROM campaigns WHERE id=$1 FOR UPDATE`, [id])).rows[0];
+  if (!c) throw new AppError("NOT_FOUND", 404);
+  if (c.status !== "DRAFT") throw new AppError("INVALID_TRANSITION", 409);
+  for (const s of ["SUBMITTED", "UNDER_REVIEW", "APPROVED", "ACTIVE"]) await setCampaignStatus(tx, actor, id, s);
+}

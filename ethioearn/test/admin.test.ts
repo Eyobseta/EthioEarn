@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it } from "vitest";
-import { createCampaign, reviewWithdrawal, setCampaignStatus, setUserSuspended } from "../src/admin.js";
+import { createCampaign, fastTrackCampaign, reviewWithdrawal, setCampaignStatus, setUserSuspended } from "../src/admin.js";
 import { balance, post } from "../src/ledger.js";
 import { requestWithdrawal } from "../src/withdrawals.js";
 import { newDb } from "./helpers.js";
@@ -42,5 +42,16 @@ describe("admin", () => {
   it("audit log is append-only", async () => {
     const a = await h.user(); await h.run((tx) => createCampaign(tx, a, input));
     await expect(h.db.query(`DELETE FROM audit_logs`)).rejects.toThrow(/append-only/);
+  });
+});
+
+describe("fast track", () => {
+  it("takes a draft to ACTIVE with every step audited, and only from DRAFT", async () => {
+    const h2 = await newDb(); const a = await h2.user();
+    const { id } = await h2.run((tx) => createCampaign(tx, a, input));
+    await h2.run((tx) => fastTrackCampaign(tx, a, id));
+    expect((await h2.db.query<any>(`SELECT status FROM campaigns WHERE id=$1`, [id])).rows[0].status).toBe("ACTIVE");
+    expect(Number((await h2.db.query<any>(`SELECT count(*) AS n FROM audit_logs`)).rows[0].n)).toBe(5);
+    await expect(h2.run((tx) => fastTrackCampaign(tx, a, id))).rejects.toThrow("INVALID_TRANSITION");
   });
 });

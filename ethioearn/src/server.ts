@@ -13,7 +13,7 @@ import { balance } from "./ledger.js";
 import { completeSession, startSession } from "./rewards.js";
 import { validateInitData } from "./telegram.js";
 import { requestWithdrawal } from "./withdrawals.js";
-import { createCampaign, reviewWithdrawal, setCampaignStatus, setUserSuspended } from "./admin.js";
+import { createCampaign, fastTrackCampaign, reviewWithdrawal, setCampaignStatus, setUserSuspended } from "./admin.js";
 
 const cfg = loadConfig();
 const pool = new pg.Pool({ connectionString: cfg.DATABASE_URL, max: 10, idleTimeoutMillis: 30_000, connectionTimeoutMillis: 15_000 });
@@ -24,7 +24,7 @@ app.set("trust proxy", 1);
 app.use(helmet({
   frameguard: false,
   contentSecurityPolicy: { directives: {
-    defaultSrc: ["'self'"], scriptSrc: ["'self'", "https://telegram.org"], styleSrc: ["'self'"],
+    defaultSrc: ["'self'"], scriptSrc: ["'self'", "https://telegram.org"], styleSrc: ["'self'"], styleSrcAttr: ["'unsafe-inline'"],
     imgSrc: ["'self'", "data:"], connectSrc: ["'self'"], objectSrc: ["'none'"], baseUri: ["'none'"],
     frameAncestors: ["'self'", "https://web.telegram.org", "https://webk.telegram.org", "https://webz.telegram.org"],
   } },
@@ -110,6 +110,31 @@ adm.post("/withdrawals/:id/paid", role("FINANCE", "SUPER"), wrap(async (req, res
 adm.post("/users/:id/suspension", role("SUPPORT", "SUPER"), wrap(async (req, res) => {
   const { suspended } = z.object({ suspended: z.boolean() }).parse(req.body);
   await withTx(pool, (tx) => setUserSuspended(tx, req.userId, uuid.parse(req.params.id), suspended)); res.json({ ok: true });
+}));
+
+const ALL = ["SUPER", "FINANCE", "SUPPORT"];
+const SIGNED = `CASE l.direction WHEN 'CREDIT' THEN l.amount ELSE -l.amount END`;
+adm.get("/me", wrap(async (req, res) => {
+  const r = (await pool.query(`SELECT role FROM admin_users WHERE user_id=$1`, [req.userId])).rows[0];
+  if (!r) throw new AppError("FORBIDDEN", 403);
+  res.json({ role: r.role });
+}));
+adm.get("/stats", role(...ALL), wrap(async (_r, res) => {
+  const r = (await pool.query(`SELECT
+    (SELECT count(*) FROM users) AS users,
+    (SELECT COALESCE(SUM(${SIGNED}),0) FROM ledger_transactions l WHERE l.user_id IS NOT NULL) AS owed,
+    (SELECT count(*) FROM withdrawals WHERE status='REQUESTED') AS pending_n,
+    (SELECT COALESCE(SUM(amount),0) FROM withdrawals WHERE status='REQUESTED') AS pending_amt`)).rows[0];
+  res.json({ users: Number(r.users), owed: Number(r.owed), pending_n: Number(r.pending_n), pending_amt: Number(r.pending_amt) });
+}));
+adm.get("/users", role(...ALL), wrap(async (req, res) => {
+  const q = z.string().max(64).default("").parse(req.query.q);
+  res.json({ items: (await pool.query(`SELECT u.id,u.telegram_user_id,u.username,u.first_name,u.status,u.created_at,
+    COALESCE((SELECT SUM(${SIGNED}) FROM ledger_transactions l WHERE l.user_id=u.id),0) AS balance
+    FROM users u WHERE $1='' OR u.username ILIKE $2 OR u.telegram_user_id::text=$1 ORDER BY u.created_at DESC LIMIT 30`, [q, `%${q}%`])).rows });
+}));
+adm.post("/campaigns/:id/activate", role("SUPER"), wrap(async (req, res) => {
+  await withTx(pool, (tx) => fastTrackCampaign(tx, req.userId, uuid.parse(req.params.id))); res.json({ ok: true });
 }));
 
 app.use("/api/v1/admin", adm);
