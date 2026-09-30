@@ -16,7 +16,9 @@ import { requestWithdrawal } from "./withdrawals.js";
 import { createCampaign, reviewWithdrawal, setCampaignStatus, setUserSuspended } from "./admin.js";
 
 const cfg = loadConfig();
-const pool = new pg.Pool({ connectionString: cfg.DATABASE_URL, max: 10 });
+const pool = new pg.Pool({ connectionString: cfg.DATABASE_URL, max: 10, idleTimeoutMillis: 30_000, connectionTimeoutMillis: 15_000 });
+// Hosted Postgres (e.g. Neon) drops idle connections. Without this handler an idle-client error crashes the process.
+pool.on("error", (e) => console.error(JSON.stringify({ level: "warn", msg: "idle db client error", detail: e.message })));
 const app = express();
 app.set("trust proxy", 1);
 app.use(helmet({
